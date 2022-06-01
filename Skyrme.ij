@@ -1,0 +1,80 @@
+#=
+Skyrme.ij A notebook of the necessary calculations for the radially
+anisotropic dialation mode of the semiclassical chiral soliton
+=#
+
+println("Starting...")
+using DifferentialEquations, Plots, Roots, QuadGK, Dierckx
+
+# Basic parameters
+if length(ARGS) > 0
+  m_pi = parse(Float64,ARGS[1])
+else
+  m_pi = 138.
+end
+F_pi = 186.
+
+println("m_pi is ",m_pi)
+# lower/upper limit of evaluation/integration
+lowerLimit = 1.e-20
+upperLimit = 10.
+
+# The differential equation for the radial profile
+function skyrmeProfile(du,u,mass,x)
+  du[1] = u[2]
+  if x < 1.e-4
+    du[2] = 0.
+  else 
+    du[2] = ((-2*x*u[2] -
+             4*sin(2*u[1])*u[2]^2 +
+             sin(2*u[1]) +
+             8*cos(u[1])*sin(u[1])^3/(x^2) +
+             (mass)^2*x^2*sin(u[1]))
+                   /
+             (x^2 + 8*sin(u[1])^2))
+  end
+end
+
+# A function for determining the boundary conditions.
+# We'll shoot with an initial derivative e and look for
+# a solution that vanishes
+function shoot(e)
+       prob = ODEProblem(skyrmeProfile,[Float64(pi),e],(lowerLimit,upperLimit),(m_pi/F_pi)^2)
+       sol = solve(prob,Tsit5(),reltol=1e-16,abstol=1e-16)
+       getindex.(sol.u,1)[length(sol.t)]
+end
+
+# finding the initial derivative
+u0 = find_zero(shoot,(-10,0.))
+
+println("Initial first derivative ",u0)
+
+solution = solve(ODEProblem(skyrmeProfile,
+                            [big(float(pi)),u0],
+                            (lowerLimit,upperLimit),
+                            (m_pi/F_pi)^2),
+                 Tsit5(),reltol=1e-16,abstol=1e-16)
+
+# The solution data points
+r = solution.t
+F0 = getindex.(solution.u,1)
+F1 = getindex.(solution.u,2)
+
+# Spline-based functions based on these data points
+radius = Spline1D(r,r)
+profile = Spline1D(r,F0)
+profilePrime = Spline1D(r,F1)
+
+Num = (-2 .*r .*F1 .-4 .*sin.(2 .*F0).*F1.^2 .+sin.(2 .*F0).+8 .*sin.(F0).^3 .*cos.(F0)./(r.^2))
+Den = (r.^2 .+ 8 .*sin.(F0).^2)
+F2 = ((-2. .* r .* F1 .-
+       4. .* sin.(2 .*F0) .* F1.^2. .+
+       sin.(2. .*F0) .+
+       8. .* sin.(F0) .^ 3. .* cos.(F0) ./ r .^2. .+
+       (m_pi/F_pi)^2 .* r .^2 .*sin.(F0))
+       ./
+       (r .^2. .+ 8. .* sin.(F0) .^ 2.))
+
+# should be equal to \pi
+integral, err = quadgk(x -> profilePrime(x),lowerLimit,upperLimit,rtol=1e-8)
+println("Integral of F' (should be pi): ",integral," with error ",err)
